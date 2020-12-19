@@ -1,0 +1,397 @@
+---
+title: "FGnerre_Project"
+author: 'Francesco Gnerre'
+date: "Friday 11 December, 2020"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    theme: cerulean
+---
+
+Each row of exo is an potential exoplanet, and if LABEL = 1, then it is an exoplanet, but if LABEL = 0, then there is nothing there.
+
+Each column of exo is a different flux, which means the light value at a different point of time. Flux.X will be the same point in time for every entry
+
+Link to the original dataset: https://www.kaggle.com/keplersmachines/kepler-labelled-time-series-data
+
+## set up code
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# read and load data
+library("caret")
+library("tidymodels") #set of functions to ease machine learning
+library("tidyverse")
+library('tree')
+library(randomForest)
+library(tree)
+library(ROCR)
+
+# load the data set
+# make testdf a copy of exoTest data
+testdf = read.csv('exoTest.csv')
+# making the labels either 0 or 1
+testdf$LABEL = testdf$LABEL - 1
+
+# exo(n) is the only matrix we will need to worry about
+exo = testdf # COPY data
+```
+
+# create functions
+```{r}
+accuracy <- function(CT){
+  # instead of doing the manual math from last week
+  # This function will compute the model accuracy from a 2x2 contingency table
+  # INPUT: CT: 2x2 contingency table
+  # OUTPUT: none (printed value)
+  a <- CT[1,1]
+  b <- CT[1,2]
+  c <- CT[2,1]
+  d <- CT[2,2]
+  accuracy <- (a + d) / (a + b + c + d)
+  print(paste0("This model's accuracy is ", round(100*accuracy, 2), " percent"))
+}
+```
+
+# get dimensions
+```{R}
+# dims = dimension(exo)
+dims<-dim(exo)
+# dims[1] = rows
+# dims[2] = columns
+```
+
+# checks the data
+```{R}
+# prints all the entries with 0 LABEL and with 1 LABEL
+labeltab = table(exo$LABEL)
+print(labeltab)
+```
+
+## threshholds 
+```{R}
+# creates a copy of the data, so that we can use the original data again
+exoThresh = exo
+# for loop goes through all the rows, 1 is the result
+for (q in 2:570){
+  # create the threshold limits at 0.025 and 0.975
+  lineVal = exoThresh[q,]
+  r95 = quantile(lineVal, c(0.025, 0.975))
+  for (o in 2:3198){
+    # goes through every point and if they are beyond the relevant threshhold, 
+    # they get threshheld to the threshhold
+    if(exoThresh[q,o] < r95[1]){
+      exoThresh[q,o] = r95[1]
+    }
+    if(exoThresh[q,o] > r95[2]){
+      exoThresh[q,o] = r95[2]
+    }
+  }
+}
+```
+
+# Downsampling Training
+```{R}
+onerows = which(exoThresh$LABEL == 0)
+tworows = which(exoThresh$LABEL == 1)
+
+sr = sample(c(1:labeltab[1],labeltab[2]),replace=FALSE)
+exoDsData = exoThresh[c(onerows[sr], tworows),]
+```
+
+# Test the downsampling
+```{R}
+# creates a tree model of LABEL from exoThressh
+treemod = tree(LABEL ~ ., data=exoDsData)
+# predicts the prediction of LABEL
+predlabel = predict(treemod)
+# plots predlabel
+plot(predlabel)
+# here we see that there are a lot of points near 0.4, which is not valid
+
+# accuracy check
+print(sum(predlabel==exoDsData$LABEL)/length(exoDsData$LABEL))
+# as we can see, the accuracy is quite bad
+
+exoThreshDownRaw = sum(predlabel==exoDsData$LABEL)/length(exoDsData$LABEL)
+# stores the accuracy of unthreshheld data
+```
+
+# Threshhold the Resutls
+```{R}
+# We need to threshhold again
+predlabel[predlabel < 0.5] = 0
+predlabel[predlabel >= 0.5] = 1
+# plots plredlabel again
+plot(predlabel)
+
+# double checks values 
+print(predlabel)
+
+# accuracy check
+print(sum(predlabel==exoThresh$LABEL)/length(exoThresh$LABEL))
+# accuracy has gotten much better
+
+exoThreshDownThresh = sum(predlabel==exoThresh$LABEL)/length(exoThresh$LABEL)
+# stores the accuracy of threshheld data
+```
+
+# upsampling training
+```{R}
+onerows = which(exoThresh$LABEL==0)
+tworows = which(exoThresh$LABEL==1)
+
+sr = sample(c(1:labeltab[2]),labeltab[1],replace=TRUE)
+exoUsData = exoThresh[c(onerows, tworows[sr]),]
+```
+
+
+# Test the upsampling
+```{R}
+# creates a tree model of LABEL from exoThresh
+treemod = tree(LABEL ~ ., data=exoUsData)
+# predicts the prediction of LABEL
+predlabel = predict(treemod)
+# plots predlabel
+plot(predlabel)
+# as we see, the data is split about 50% and 50%, which is what we tried, but there are still a lot of entries at or near 0.65 and 0.05
+# accuracy is terrible though, which is due to so many being just barely far away from 0 or 1
+
+# accuracy check
+print(sum(predlabel==exoUsData$LABEL)/length(exoUsData$LABEL))
+
+exoThreshUpRaw = sum(predlabel==exoUsData$LABEL)/length(exoUsData$LABEL)
+# stores the accuracy
+```
+# Threshhold the Resutls
+```{R}
+# We need to threshhold again
+predlabel[predlabel < 0.5] = 0
+predlabel[predlabel >= 0.5] = 1
+# plots plredlabel again
+plot(predlabel)
+
+# double checks values 
+print(predlabel)
+
+# accuracy check
+print(sum(predlabel==exoThresh$LABEL)/length(exoThresh$LABEL))
+# accuracy has gotten much better
+
+exoThreshUpThresh = sum(predlabel==exoThresh$LABEL)/length(exoThresh$LABEL)
+# stores the accuracy
+```
+
+## Logistic Curve
+```{R}
+# creates a copy of the data, so that we can use the original data again
+exoLog = exo
+# for loop goes through all the rows, 1 is the result
+for (q in 2:570){
+  for (o in 2:3198){
+    # goes through every point and set it equal to a number between -1 and 1
+    # uses the equation (2 / (1+e^-x)) + 1
+    denom = 1 + exp(-1*exoLog[q,o])
+    exoLog[q,o] = (2 / denom) + 1
+  }
+}
+```
+
+# Downsampling Training
+```{R}
+onerows = which(exoLog$LABEL == 0)
+tworows = which(exoLog$LABEL == 1)
+
+sr = sample(c(1:labeltab[1],labeltab[2]),replace=FALSE)
+exoDsData = exoLog[c(onerows[sr], tworows),]
+```
+
+# Test the downsampling
+```{R}
+# creates a tree model of LABEL from exoLog
+treemod = tree(LABEL ~ ., data=exoDsData)
+# predicts the prediction of LABEL
+predlabel = predict(treemod)
+# plots predlabel
+plot(predlabel)
+# we see that the results are all over the place
+# however, there is a large concentration close to 0
+
+# accuracy check
+print(sum(predlabel==exoDsData$LABEL)/length(exoDsData$LABEL))
+# as we can see, the accuracy is quite bad
+# this is likely due to a lot of data not being 1 or 0
+
+exoLogDownRaw = sum(predlabel==exoDsData$LABEL)/length(exoDsData$LABEL)
+# saves accuracy
+```
+# Threshhold the Resutls
+```{R}
+# We need to threshhold of predlabel
+predlabel[predlabel < 0.5] = 0
+predlabel[predlabel >= 0.5] = 1
+# plots plredlabel again
+plot(predlabel)
+
+# double checks values 
+print(predlabel)
+
+# accuracy check
+print(sum(predlabel==exoLog$LABEL)/length(exoLog$LABEL))
+# accuracy has gotten much better
+
+exoLogDownThresh = sum(predlabel==exoLog$LABEL)/length(exoLog$LABEL)
+# saves accuracy
+```
+
+# upsampling training
+```{R}
+onerows = which(exoLog$LABEL==0)
+tworows = which(exoLog$LABEL==1)
+
+sr = sample(c(1:labeltab[2]),labeltab[1],replace=TRUE)
+exoUsData = exoLog[c(onerows, tworows[sr]),]
+```
+
+# Test the upsampling
+```{R}
+# creates a tree model of LABEL from exoLog
+treemod = tree(LABEL ~ ., data=exoUsData)
+# predicts the prediction of LABEL
+predlabel = predict(treemod)
+# plots predlabel
+plot(predlabel)
+# accuracy is terrible
+
+# accuracy check
+print(sum(predlabel==exoUsData$LABEL)/length(exoUsData$LABEL))
+# accuracy is pretty bad. A lot of points are just near, not at, 0 or 1
+
+exoLogUpRaw = sum(predlabel==exoUsData$LABEL)/length(exoUsData$LABEL)
+# stores the accuracy
+```
+
+# Threshholds the results
+```{R}
+# We need to threshhold of predlabel
+predlabel[predlabel < 0.5] = 0
+predlabel[predlabel >= 0.5] = 1
+# plots plredlabel again
+plot(predlabel)
+
+# double checks values 
+print(predlabel)
+
+# accuracy check
+print(sum(predlabel==exoLog$LABEL)/length(exoLog$LABEL))
+# accuracy has gotten much better, over 95% accurate!
+
+exoLogUpThresh = sum(predlabel==exoLog$LABEL)/length(exoLog$LABEL)
+# saves accuracy
+```
+
+## Check the results
+```{R}
+resultsThresh<-c(exoThreshDownRaw, exoThreshDownThresh, exoThreshUpRaw, exoThreshUpThresh)
+resultsLog<-c(exoLogDownRaw, exoLogDownThresh, exoLogUpRaw, exoLogUpThresh)
+# stores the results in a vector
+
+plot(resultsThresh)
+plot(resultsLog)
+# visaulize the data
+
+# exoThresh Downsampling: 0.19/0.94
+# exoThresh Upsampling: 0.01/0.96
+# exoLog Downsampling: 0.19/0.94
+# exoLog Upsampling: 0.01/0.96
+# exoTree: 
+
+# results seem to indicate that, for this dataset, either condensing the data to between -1 and 1 or threshholding to the 95 percentile does not do much to change the accuracy. Instead,it seems that Downsampling is substantially more accurate when dealing with unrounded data, but rounded data has Upsampling slightly more accruate
+```
+
+## Trees
+```{R}
+exoTree = exo
+# Create a copy for our tree checks
+
+# for loop goes through all the rows, 1 is the result
+for (q in 2:570){
+  for (o in 2:3198){
+    # goes through every point and set it equal to a number between -1 and 1
+    # uses the equation (2 / (1+e^-x)) +1
+    denom = 1 + exp(-1*exoTree[q,o])
+    exoTree[q,o] = (2 / denom) + 1
+  }
+}
+# Uses Log to calculate because it provided better results than Treshholding, and is much more manageable than not doing anything
+```
+
+# declare dataframe
+```{R}
+High=factor(ifelse(exoTree$LABEL==1,"1","0"))
+# factor is if LABEL = 1, then it will be 1, otherwise, it will be 0
+planetTree = data.frame(exoTree,High)
+# planetTree is the dataframe to be used
+```
+
+# make and print tree
+```{R}
+tree.planetTree = tree(High~.-LABEL,planetTree, control=tree.control(3199, mincut = 10))
+# creates Tree from planetTree
+summary(tree.planetTree)
+# prints summary of planetTree tree
+# misclass error: 0.008772 (5/570)
+```
+
+#plot and write out tree
+```{R}
+plot(tree.planetTree)
+# plots the tree
+text(tree.planetTree, pretty = 0)
+# divides the tree. 
+tree.planetTree
+# writes the output
+```
+
+
+# test the tree 
+```{R}
+accs = replicate(500,0)
+# creates a vector of 0s ,to store the accuracies
+zrows = which(exoTree$LABEL==0)
+orows = which(exoTree$LABEL==1)
+
+for (q in 1:500){
+  set.seed(q)
+  # sets seed to q, which goes from 1 to 500, for 500 different cross validation 
+  
+  train=sample(c(1:labeltab[1]),labeltab[2],replace=TRUE)
+  # get training data with replacement
+  
+  planetTreeTemp = planetTree
+  HighTemp = High
+  # creates copies of planetTree and High, to use
+  
+  planetTreeTemp.test=planetTreeTemp[-train,]
+  HighTemp.test=HighTemp[-train]
+  # removes training data from planetTree and High copies
+  
+  tree.planetTreeTemp=tree(High~.-LABEL,planetTreeTemp,subset=train)
+  tree.pred=predict(tree.planetTreeTemp,planetTreeTemp.test,type="class")
+  table(tree.pred,HighTemp.test)
+  # creates tables
+  
+  scount = 0
+  for (o in 1:length(tree.pred)){
+    if (tree.pred[o] == HighTemp.test[o]){
+      scount = scount + 1
+    }
+  }
+  accs[q] = (scount/length(tree.pred))
+  print(accs[q])
+  # gets accuracy 
+  # very accurate
+}
+```
